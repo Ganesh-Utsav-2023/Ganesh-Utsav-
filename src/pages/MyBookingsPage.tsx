@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../firebaseConfig.ts';
+import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { db, auth } from '../firebaseConfig.ts';
 import { api } from '../lib/api.ts';
 import { Booking } from '../types/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
@@ -35,7 +35,7 @@ interface MyBookingsPageProps {
 }
 
 export const MyBookingsPage: React.FC<MyBookingsPageProps> = ({ onNavigate }) => {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   
   // Devotee bookings state
   const [userBookings, setUserBookings] = useState<Booking[]>([]);
@@ -59,62 +59,112 @@ export const MyBookingsPage: React.FC<MyBookingsPageProps> = ({ onNavigate }) =>
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
 
-  // Fetch devotee's own bookings on mount/user change
+  // Real-time Firestore subscription for authenticated devotee bookings
   useEffect(() => {
-    if (!user) {
+    // If Firebase Auth is still loading, wait before querying
+    if (authLoading) {
+      setLoadingBookings(true);
+      return;
+    }
+
+    const currentUid = auth.currentUser?.uid || user?.id || user?.uid;
+    if (!currentUid) {
+      setUserBookings([]);
+      setSelectedBooking(null);
       setLoadingBookings(false);
       return;
     }
 
-    const fetchMyBookings = async () => {
-      setLoadingBookings(true);
-      try {
-        let bookings: Booking[] = [];
-        try {
-          const res = await api.getMyBookings();
-          bookings = res.bookings || [];
-        } catch (apiErr) {
-          console.warn('API getMyBookings note, fetching from Firestore:', apiErr);
+    console.log('AUTH UID:', currentUid);
+    console.log('MY BOOKINGS QUERY UID:', currentUid);
+    setLoadingBookings(true);
+
+    const bookingsCol = collection(db, 'bookings');
+    const q = query(bookingsCol, where('userId', '==', currentUid));
+
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: Booking[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          const docId = docSnap.id;
+          const bId = data.booking_id || data.bookingId || docId;
+          const tokenNum = data.tokenNumber ?? data.token_number ?? 1;
+          const pId = data.passId || data.pass_id || '';
+          const sDate = data.slot_date || data.date || '2026-09-14';
+          const seats = Number(data.numberOfPeople ?? data.number_of_people) || 1;
+
+          return {
+            ...data,
+            id: docId,
+            doc_id: docId,
+            booking_id: bId,
+            bookingId: bId,
+            userId: data.userId || data.user_id || currentUid,
+            user_id: data.userId || data.user_id || currentUid,
+            devoteeName: data.devoteeName || data.devotee_name || '',
+            devotee_name: data.devoteeName || data.devotee_name || '',
+            phone: data.phone || data.mobile || '',
+            mobile: data.phone || data.mobile || '',
+            email: data.email || '',
+            slot_date: sDate,
+            date: sDate,
+            timeSlot: data.timeSlot || '07:30 PM – 09:00 PM',
+            slot_start_time: data.slot_start_time || '07:30 PM',
+            slot_end_time: data.slot_end_time || '09:00 PM',
+            numberOfPeople: seats,
+            number_of_people: seats,
+            address: data.address || '',
+            specialRequest: data.specialRequest || data.special_request || '',
+            special_request: data.specialRequest || data.special_request || '',
+            status: data.status || 'PENDING',
+            bookingSource: data.bookingSource || data.booking_source || 'ONLINE',
+            booking_source: data.bookingSource || data.booking_source || 'ONLINE',
+            tokenNumber: tokenNum,
+            token_number: tokenNum,
+            passId: pId,
+            pass_id: pId,
+            passGenerated: Boolean(data.passGenerated || data.pass_generated || data.status === 'ACCEPTED'),
+            pass_generated: Boolean(data.passGenerated || data.pass_generated || data.status === 'ACCEPTED'),
+            createdAt: data.createdAt || data.created_at || new Date().toISOString(),
+            created_at: data.created_at || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+            updatedAt: data.updatedAt || data.updated_at || new Date().toISOString(),
+            updated_at: data.updated_at || (data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : new Date().toISOString()),
+          } as Booking;
+        });
+
+        // Sort newest bookings first
+        list.sort((a, b) => {
+          const timeA = new Date(a.created_at || (a as any).createdAt || 0).getTime();
+          const timeB = new Date(b.created_at || (b as any).createdAt || 0).getTime();
+          return timeB - timeA;
+        });
+
+        console.log('MY BOOKINGS RESULT COUNT:', list.length);
+        if (list.length === 0) {
+          console.log(`[MyBookings] 0 bookings returned for userId == "${currentUid}".`);
         }
 
-        // If API returned empty or failed, fetch directly from Firestore
-        if (bookings.length === 0 && user) {
-          try {
-            const bookingsCol = collection(db, 'bookings');
-            const q1 = query(bookingsCol, where('userId', '==', user.id || user.uid));
-            const snap1 = await getDocs(q1);
-            const list1: Booking[] = snap1.docs.map((d) => ({ ...(d.data() as any), id: d.id, doc_id: d.id }));
-
-            const q2 = query(bookingsCol, where('user_id', '==', user.id || user.uid));
-            const snap2 = await getDocs(q2);
-            const list2: Booking[] = snap2.docs.map((d) => ({ ...(d.data() as any), id: d.id, doc_id: d.id }));
-
-            const combinedMap = new Map<string, Booking>();
-            list1.concat(list2).forEach((b) => {
-              const key = String(b.booking_id || b.id || b.doc_id);
-              if (key) combinedMap.set(key, b);
-            });
-            bookings = Array.from(combinedMap.values());
-          } catch (fsErr) {
-            console.warn('Firestore fallback note:', fsErr);
-          }
-        }
-
-        // Sort newest first
-        bookings.sort((a, b) => new Date(b.created_at || (b as any).createdAt || 0).getTime() - new Date(a.created_at || (a as any).createdAt || 0).getTime());
-        setUserBookings(bookings);
-        if (bookings.length > 0) {
-          setSelectedBooking(bookings[0]);
-        }
-      } catch (err) {
-        console.error('Error fetching bookings:', err);
-      } finally {
+        setUserBookings(list);
+        setSelectedBooking((prev) => {
+          if (!prev) return list[0] || null;
+          const match = list.find((item) => (item.doc_id || item.id) === (prev.doc_id || prev.id));
+          return match || list[0] || null;
+        });
+        setLoadingBookings(false);
+      },
+      (err) => {
+        console.error('CRITICAL: Error in MyBookings onSnapshot listener:', {
+          code: err.code,
+          message: err.message,
+          error: err,
+        });
         setLoadingBookings(false);
       }
-    };
+    );
 
-    fetchMyBookings();
-  }, [user]);
+    return () => unsub();
+  }, [authLoading, user]);
 
   // Perform manual search lookup
   const performLookup = async (idToSearch: string, phoneToSearch: string) => {

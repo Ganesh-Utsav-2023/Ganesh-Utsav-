@@ -98,24 +98,6 @@ export function subscribeToFestivalSettings(
   onUpdate: (settings: FestivalSettings) => void,
   onError?: (err: unknown) => void
 ): () => void {
-  // If user is not authenticated, load from cache/defaults without triggering permission-denied
-  if (!auth.currentUser) {
-    try {
-      const raw = localStorage.getItem(`${SETTINGS_KEY_PREFIX}${year}`);
-      if (raw) {
-        onUpdate(JSON.parse(raw));
-        return () => {};
-      }
-    } catch (e) {}
-    const defaults = getCalculatedFestivalPeriod(year);
-    onUpdate({
-      ...defaults,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    return () => {};
-  }
-
   const docRef = doc(db, 'festivalSettings', String(year));
 
   const unsub = onSnapshot(
@@ -126,12 +108,25 @@ export function subscribeToFestivalSettings(
         localStorage.setItem(`${SETTINGS_KEY_PREFIX}${year}`, JSON.stringify(data));
         onUpdate(data);
       } else {
-        getOrInitFestivalSettings(year).then(onUpdate).catch(() => {});
+        const defaults = getCalculatedFestivalPeriod(year);
+        const fallbackSettings: FestivalSettings = {
+          ...defaults,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        localStorage.setItem(`${SETTINGS_KEY_PREFIX}${year}`, JSON.stringify(fallbackSettings));
+        onUpdate(fallbackSettings);
       }
     },
     (err) => {
+      console.warn('Firestore festivalSettings listener error:', err);
       if (onError) onError(err);
-      getOrInitFestivalSettings(year).then(onUpdate).catch(() => {});
+      const defaults = getCalculatedFestivalPeriod(year);
+      onUpdate({
+        ...defaults,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
     }
   );
 
@@ -189,20 +184,6 @@ export function subscribeToActiveFestivalYear(
   onUpdate: (year: number) => void,
   onError?: (err: unknown) => void
 ): () => void {
-  // If user is not authenticated, load from cache/defaults without triggering permission-denied
-  if (!auth.currentUser) {
-    let year = 2026;
-    try {
-      const raw = localStorage.getItem(ACTIVE_YEAR_KEY);
-      if (raw) {
-        const parsed = parseInt(raw, 10);
-        if (!isNaN(parsed)) year = parsed;
-      }
-    } catch (e) {}
-    onUpdate(year);
-    return () => {};
-  }
-
   const docRef = doc(db, 'festivalSettings', 'current');
 
   const unsub = onSnapshot(
@@ -213,12 +194,13 @@ export function subscribeToActiveFestivalYear(
         localStorage.setItem(ACTIVE_YEAR_KEY, String(year));
         onUpdate(year);
       } else {
-        getActiveFestivalYear().then(onUpdate).catch(() => {});
+        onUpdate(2026);
       }
     },
     (err) => {
+      console.warn('Firestore active festival year listener error:', err);
       if (onError) onError(err);
-      getActiveFestivalYear().then(onUpdate).catch(() => {});
+      onUpdate(2026);
     }
   );
 

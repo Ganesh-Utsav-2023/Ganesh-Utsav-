@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { auth } from '../firebaseConfig.ts';
 import { api } from '../lib/api.ts';
 import { AartiSlot, Booking } from '../types/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
@@ -37,53 +38,15 @@ export const BookAartiPage: React.FC<BookAartiPageProps> = ({
   preselectedSlotId,
   initialDate,
 }) => {
-  const { user } = useAuth();
-
-  if (!user) {
-    return (
-      <div className="max-w-md mx-auto px-4 py-16">
-        <div className="bg-white rounded-3xl p-8 border-2 border-amber-200 text-center shadow-lg space-y-6">
-          <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 p-2 mx-auto flex items-center justify-center shadow-inner">
-            <img
-              src="/logo.png"
-              alt="Navyuvak Ganesh Mitra Mandal Logo"
-              className="w-full h-full object-contain"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-bold font-serif text-stone-900">Aarti Slot Reservation</h2>
-            <p className="text-xs text-amber-800 font-bold bg-amber-50 rounded-lg py-2 px-3 inline-block border border-amber-200">
-              Please Sign In or Log In to book your Aarti slot.
-            </p>
-            <p className="text-xs text-stone-600 leading-relaxed mt-2">
-              To preserve the sanctity and fair allocation of the limited Aarti seats (11 seats daily), devotee authentication is strictly required before slots can be requested.
-            </p>
-          </div>
-          <div className="pt-2 space-y-2">
-            <button
-              onClick={() => onNavigate('register')}
-              className="w-full py-3 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 shadow-md transition-all cursor-pointer"
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => onNavigate('login')}
-              className="w-full py-3 px-4 rounded-xl text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors cursor-pointer"
-            >
-              Log In
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const { user, loading: authLoading } = useAuth();
 
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>(initialDate || '2026-09-14');
   const [slots, setSlots] = useState<AartiSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState<boolean>(true);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState<number>(0);
 
   // Form states
   const [selectedSlotId, setSelectedSlotId] = useState<number | string | null>(preselectedSlotId || null);
@@ -135,12 +98,14 @@ export const BookAartiPage: React.FC<BookAartiPageProps> = ({
   // Load slots for selected date using real-time listener
   useEffect(() => {
     setLoadingSlots(true);
+    setSlotsError(null);
 
     const unsubscribe = subscribeToAartiSlots(
       selectedDate,
       (updatedSlots) => {
         setSlots(updatedSlots);
         setLoadingSlots(false);
+        setSlotsError(null);
 
         // Auto select available slot for selected date
         if (updatedSlots.length > 0) {
@@ -150,14 +115,70 @@ export const BookAartiPage: React.FC<BookAartiPageProps> = ({
           }
         }
       },
-      (err) => {
-        console.warn('Realtime slots error in BookAartiPage:', err);
+      (err: any) => {
+        console.error('Realtime Firestore Aarti slots listener error:', {
+          code: err?.code,
+          message: err?.message,
+          error: err,
+        });
+        setSlotsError('Unable to load Aarti slot availability. Please try again.');
         setLoadingSlots(false);
       }
     );
 
     return () => unsubscribe();
-  }, [selectedDate]);
+  }, [selectedDate, retryCount]);
+
+  if (authLoading) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16 text-center">
+        <div className="bg-white rounded-3xl p-8 border border-amber-200 shadow-md flex flex-col items-center justify-center space-y-4">
+          <div className="w-8 h-8 border-3 border-amber-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-xs text-amber-900 font-medium">Verifying devotee session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16">
+        <div className="bg-white rounded-3xl p-8 border-2 border-amber-200 text-center shadow-lg space-y-6">
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 p-2 mx-auto flex items-center justify-center shadow-inner">
+            <img
+              src="/logo.png"
+              alt="Navyuvak Ganesh Mitra Mandal Logo"
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold font-serif text-stone-900">Aarti Slot Reservation</h2>
+            <p className="text-xs text-amber-800 font-bold bg-amber-50 rounded-lg py-2 px-3 inline-block border border-amber-200">
+              Please Sign In or Log In to book your Aarti slot.
+            </p>
+            <p className="text-xs text-stone-600 leading-relaxed mt-2">
+              To preserve the sanctity and fair allocation of the limited Aarti seats (11 seats daily), devotee authentication is strictly required before slots can be requested.
+            </p>
+          </div>
+          <div className="pt-2 space-y-2">
+            <button
+              onClick={() => onNavigate('register')}
+              className="w-full py-3 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 shadow-md transition-all cursor-pointer"
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => onNavigate('login')}
+              className="w-full py-3 px-4 rounded-xl text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors cursor-pointer"
+            >
+              Log In
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Safely derive active slot with robust fallback so it is never null/hidden
   const selectedSlot: AartiSlot =
@@ -245,7 +266,7 @@ export const BookAartiPage: React.FC<BookAartiPageProps> = ({
     try {
       const { bookingId, booking } = await createBookingAtomic({
         slotId: activeSlotId,
-        userId: user?.id || 'guest',
+        userId: user?.uid || user?.id || (auth.currentUser ? auth.currentUser.uid : ''),
         devoteeName: devoteeName.trim(),
         phone: phone.trim(),
         email: email.trim(),
@@ -445,6 +466,20 @@ export const BookAartiPage: React.FC<BookAartiPageProps> = ({
               {loadingSlots ? (
                 <div className="h-20 rounded-2xl bg-amber-50 border border-amber-200 animate-pulse flex items-center justify-center text-xs text-amber-800">
                   Loading Aarti slot availability...
+                </div>
+              ) : slotsError ? (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-rose-700">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-600" />
+                    <span>{slotsError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRetryCount((prev) => prev + 1)}
+                    className="px-3 py-1 bg-rose-600 text-white rounded-lg text-xs font-semibold hover:bg-rose-700 transition-colors flex-shrink-0 cursor-pointer"
+                  >
+                    Try Again
+                  </button>
                 </div>
               ) : selectedSlot ? (
                 <div

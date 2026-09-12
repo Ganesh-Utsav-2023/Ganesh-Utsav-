@@ -46,36 +46,41 @@ export async function getAartiAvailability(date: string): Promise<{
   status: 'AVAILABLE' | 'PARTIAL' | 'SOLD_OUT';
 }> {
   try {
-    const res = await api.getSlots(date);
-    const slot = res?.slots?.[0];
-    const capacity = Number(slot?.capacity) || DAILY_AARTI_CAPACITY;
-    const occupiedSeats = Number(slot?.booked_count ?? slot?.bookedCount) || 0;
-    const remainingSeats = Math.max(0, capacity - occupiedSeats);
-    let status: 'AVAILABLE' | 'PARTIAL' | 'SOLD_OUT' = 'AVAILABLE';
-    if (remainingSeats <= 0) {
-      status = 'SOLD_OUT';
-    } else if (occupiedSeats > 0) {
-      status = 'PARTIAL';
+    const slotDocRef = doc(db, 'aartiSlots', date);
+    const snap = await getDoc(slotDocRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      const capacity = Number(data.capacity) || DAILY_AARTI_CAPACITY;
+      const occupiedSeats = Number(data.bookedCount ?? data.booked_count) || 0;
+      const remainingSeats = Math.max(0, capacity - occupiedSeats);
+      let status: 'AVAILABLE' | 'PARTIAL' | 'SOLD_OUT' = 'AVAILABLE';
+      if (remainingSeats <= 0) {
+        status = 'SOLD_OUT';
+      } else if (occupiedSeats > 0) {
+        status = 'PARTIAL';
+      }
+      return {
+        capacity,
+        occupiedSeats,
+        remainingSeats,
+        status,
+      };
     }
-    return {
-      capacity,
-      occupiedSeats,
-      remainingSeats,
-      status,
-    };
   } catch (err) {
-    return {
-      capacity: DAILY_AARTI_CAPACITY,
-      occupiedSeats: 0,
-      remainingSeats: DAILY_AARTI_CAPACITY,
-      status: 'AVAILABLE',
-    };
+    console.warn('Firestore getAartiAvailability error note:', err);
   }
+
+  return {
+    capacity: DAILY_AARTI_CAPACITY,
+    occupiedSeats: 0,
+    remainingSeats: DAILY_AARTI_CAPACITY,
+    status: 'AVAILABLE',
+  };
 }
 
 /**
- * Dynamic occupancy recount: sums people for PENDING and ACCEPTED bookings for a date
- * and updates the aartiSlots document in Firestore.
+ * Dynamic occupancy recount: sums people for active bookings for a date
+ * (excluding CANCELLED, REJECTED, DELETED) and updates the aartiSlots document in Firestore.
  */
 export async function recountSlotOccupancy(selectedDate: string, slotId: string | number): Promise<number> {
   try {
@@ -86,8 +91,11 @@ export async function recountSlotOccupancy(selectedDate: string, slotId: string 
     snapshot.forEach((docSnap) => {
       const data = docSnap.data();
       const bDate = data.slot_date || data.date || '';
-      const status = data.status || 'PENDING';
-      if (bDate === selectedDate && (status === 'PENDING' || status === 'ACCEPTED')) {
+      const rawStatus = (data.status || 'PENDING').toUpperCase();
+      const isExcluded = rawStatus === 'CANCELLED' || rawStatus === 'REJECTED' || rawStatus === 'DELETED';
+      const isActive = !isExcluded && (rawStatus === 'PENDING' || rawStatus === 'ACCEPTED' || rawStatus === 'CONFIRMED');
+      
+      if (bDate === selectedDate && isActive) {
         const people = Number(data.number_of_people ?? data.numberOfPeople) || 1;
         totalBooked += people;
       }
@@ -124,13 +132,7 @@ export async function recountSlotOccupancy(selectedDate: string, slotId: string 
  * from the token numbers of active bookings on a given date in Firestore.
  */
 export async function getNextAvailableToken(selectedDate: string): Promise<number> {
-  try {
-    const res = await api.getSlots(selectedDate);
-    // Token is safely allocated by backend SQLite transaction
-    return 1;
-  } catch (err) {
-    return 1;
-  }
+  return 1;
 }
 
 /**
@@ -147,12 +149,10 @@ export async function recountAndMigrateSlotCapacities(): Promise<void> {
   // Utility for slot capacity audits
 }
 
-let isFetchingSlotsFallback = false;
-let lastSlotsFallbackTime = 0;
 let bookingRequestCounter = 0;
 
 /**
- * Real-time listener for Aarti Slots in Firestore & Backend API.
+ * Real-time listener for Aarti Slots directly from Firestore.
  */
 export function subscribeToAartiSlots(
   dateFilter: string | undefined,
@@ -161,80 +161,107 @@ export function subscribeToAartiSlots(
 ): () => void {
   let isSubscribed = true;
 
-  const fetchAndUpdateFromApi = async () => {
-    try {
-      const res = await api.getSlots(dateFilter);
-      if (res && res.slots && isSubscribed) {
-        const slots: AartiSlot[] = res.slots.map((s: any) => {
-          const booked = Number(s.booked_count ?? s.bookedCount) || 0;
-          const cap = Number(s.capacity) || DAILY_AARTI_CAPACITY;
-          const rem = Math.max(0, cap - booked);
+  const processDocs = (docs: any[]) => {
+    if (!isSubscribed) return;
 
-          return {
-            id: s.id,
-            doc_id: String(s.id),
-            date: s.date,
-            name: 'Maha Sandhya Aarti',
-            start_time: s.start_time || s.startTime || '07:30 PM',
-            end_time: s.end_time || s.endTime || '09:00 PM',
-            capacity: cap,
-            status: rem <= 0 ? 'FULL' : (s.status || (booked > 0 ? 'PARTIAL' : 'AVAILABLE')),
-            booked_count: booked,
-            bookedCount: booked,
-            remaining_capacity: rem,
-            remainingSeats: rem,
-            created_at: s.created_at || new Date().toISOString(),
-            updated_at: s.updated_at || new Date().toISOString(),
-          } as AartiSlot;
-        });
+    const allSlots: AartiSlot[] = docs.map((docSnap) => {
+      const data = typeof docSnap.data === 'function' ? docSnap.data() : docSnap;
+      const docId = docSnap.id || data.id || data.date;
+      const booked = Number(data.bookedCount ?? data.booked_count) || 0;
+      const cap = Number(data.capacity) || DAILY_AARTI_CAPACITY;
+      const rem = Math.max(0, cap - booked);
 
-        if (dateFilter) {
-          const filtered = slots.filter((s) => s.date === dateFilter);
-          if (filtered.length === 0) {
-            onUpdate([{
-              id: dateFilter as any,
-              date: dateFilter,
-              name: 'Maha Sandhya Aarti',
-              start_time: '07:30 PM',
-              end_time: '09:00 PM',
-              capacity: DAILY_AARTI_CAPACITY,
-              status: 'AVAILABLE',
-              booked_count: 0,
-              bookedCount: 0,
-              remaining_capacity: DAILY_AARTI_CAPACITY,
-              remainingSeats: DAILY_AARTI_CAPACITY,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            }]);
-          } else {
-            onUpdate(filtered);
-          }
-        } else {
-          onUpdate(slots);
-        }
+      return {
+        id: docId,
+        doc_id: String(docId),
+        date: data.date,
+        name: 'Maha Sandhya Aarti',
+        start_time: data.start_time || data.startTime || '07:30 PM',
+        end_time: data.end_time || data.endTime || '09:00 PM',
+        capacity: cap,
+        status: rem <= 0 ? 'FULL' : (data.status || (booked > 0 ? 'PARTIAL' : 'AVAILABLE')),
+        booked_count: booked,
+        bookedCount: booked,
+        remaining_capacity: rem,
+        remainingSeats: rem,
+        created_at: data.created_at || data.createdAt || new Date().toISOString(),
+        updated_at: data.updated_at || data.updatedAt || new Date().toISOString(),
+      } as AartiSlot;
+    });
+
+    if (dateFilter) {
+      const matched = allSlots.filter((s) => s.date === dateFilter);
+      if (matched.length > 0) {
+        onUpdate(matched);
+      } else {
+        // Missing slot document for this date - show available with 11 capacity as per requirements
+        onUpdate([{
+          id: dateFilter,
+          doc_id: dateFilter,
+          date: dateFilter,
+          name: 'Maha Sandhya Aarti',
+          start_time: '07:30 PM',
+          end_time: '09:00 PM',
+          capacity: DAILY_AARTI_CAPACITY,
+          status: 'AVAILABLE',
+          booked_count: 0,
+          bookedCount: 0,
+          remaining_capacity: DAILY_AARTI_CAPACITY,
+          remainingSeats: DAILY_AARTI_CAPACITY,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }]);
       }
-    } catch (e) {
-      console.warn('API slots fetch fallback note:', e);
+    } else {
+      onUpdate(allSlots);
     }
   };
-
-  fetchAndUpdateFromApi();
-  const interval = setInterval(fetchAndUpdateFromApi, 4000);
 
   const slotsCol = collection(db, 'aartiSlots');
   const unsub = onSnapshot(
     slotsCol,
-    () => {
-      fetchAndUpdateFromApi();
+    (snapshot) => {
+      processDocs(snapshot.docs);
     },
     (err) => {
-      if (onError) onError(err);
+      console.error('CRITICAL: Firestore aartiSlots onSnapshot listener error:', {
+        code: (err as any)?.code,
+        message: (err as any)?.message,
+        details: err,
+      });
+
+      if (onError) {
+        onError(err);
+      }
+
+      // Safe fallback: ensure loading state is not stuck indefinitely
+      if (isSubscribed) {
+        if (dateFilter) {
+          onUpdate([{
+            id: dateFilter,
+            doc_id: dateFilter,
+            date: dateFilter,
+            name: 'Maha Sandhya Aarti',
+            start_time: '07:30 PM',
+            end_time: '09:00 PM',
+            capacity: DAILY_AARTI_CAPACITY,
+            status: 'AVAILABLE',
+            booked_count: 0,
+            bookedCount: 0,
+            remaining_capacity: DAILY_AARTI_CAPACITY,
+            remainingSeats: DAILY_AARTI_CAPACITY,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }]);
+        } else {
+          onUpdate([]);
+        }
+      }
     }
   );
 
   return () => {
     isSubscribed = false;
-    clearInterval(interval);
     unsub();
   };
 }
@@ -338,6 +365,7 @@ export async function createBookingAtomic(params: {
 
   const tokenNumberValue = b?.token_number || b?.tokenNumber || 1;
   const requestedSeats = Number(params.numberOfPeople) || 1;
+  const generatedPassId = b?.pass_id || b?.passId || `GA-PASS-2026-${Math.floor(10000 + Math.random() * 90000)}`;
 
   // Build clean booking document with zero undefined values
   const bookingData: any = {
@@ -348,34 +376,39 @@ export async function createBookingAtomic(params: {
     userId: verifiedUserId,
     user_id: verifiedUserId,
     slot_id: Number(params.slotId) || 1,
-    devotee_name: params.devoteeName || '',
-    phone: params.phone || '',
-    mobile: params.phone || '',
-    email: params.email || '',
-    number_of_people: requestedSeats,
+    devoteeName: params.devoteeName?.trim() || '',
+    devotee_name: params.devoteeName?.trim() || '',
+    phone: params.phone?.trim() || '',
+    mobile: params.phone?.trim() || '',
+    email: params.email?.trim() || '',
+    date: params.selectedDate || '2026-09-14',
+    slot_date: params.selectedDate || '2026-09-14',
+    timeSlot: '07:30 PM – 09:00 PM',
+    slot_start_time: '07:30 PM',
+    slot_end_time: '09:00 PM',
     numberOfPeople: requestedSeats,
-    address: params.address || '',
-    specialRequest: params.specialRequest || '',
-    special_request: params.specialRequest || '',
+    number_of_people: requestedSeats,
+    address: params.address?.trim() || '',
+    specialRequest: params.specialRequest?.trim() || '',
+    special_request: params.specialRequest?.trim() || '',
     status: params.status || 'PENDING',
     bookingSource: params.bookingSource || 'ONLINE',
     booking_source: params.bookingSource || 'ONLINE',
-    date: params.selectedDate || '2026-09-14',
-    slot_date: params.selectedDate || '2026-09-14',
-    timeSlot: '07:30 PM',
-    slot_start_time: '07:30 PM',
-    slot_end_time: '09:00 PM',
     tokenNumber: tokenNumberValue,
     token_number: tokenNumberValue,
-    passId: b?.pass_id || b?.passId || '',
-    passGenerated: Boolean(b?.pass_generated || b?.passGenerated),
-    emailSent: Boolean(b?.email_sent || b?.emailSent),
-    emailSentAt: b?.email_sent_at || b?.emailSentAt || null,
+    passId: generatedPassId,
+    pass_id: generatedPassId,
+    passGenerated: Boolean(params.status === 'ACCEPTED'),
+    pass_generated: Boolean(params.status === 'ACCEPTED'),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+
+  console.log('AUTH UID:', currentUser.uid);
+  console.log('BOOKING CREATED:', bookingId);
+  console.log('BOOKING USER ID:', bookingData.userId);
 
   // Save to Firestore securely respecting Firestore Security Rules
   try {
@@ -448,25 +481,30 @@ export async function createBookingAtomic(params: {
     userId: verifiedUserId,
     user_id: verifiedUserId,
     slot_id: Number(params.slotId) || 1,
-    devotee_name: params.devoteeName || '',
-    phone: params.phone || '',
-    email: params.email || '',
-    number_of_people: requestedSeats,
+    devoteeName: params.devoteeName?.trim() || '',
+    devotee_name: params.devoteeName?.trim() || '',
+    phone: params.phone?.trim() || '',
+    mobile: params.phone?.trim() || '',
+    email: params.email?.trim() || '',
     numberOfPeople: requestedSeats,
-    address: params.address || '',
-    special_request: params.specialRequest || '',
+    number_of_people: requestedSeats,
+    address: params.address?.trim() || '',
+    specialRequest: params.specialRequest?.trim() || '',
+    special_request: params.specialRequest?.trim() || '',
     status: params.status || 'PENDING',
+    bookingSource: params.bookingSource || 'ONLINE',
     booking_source: params.bookingSource || 'ONLINE',
     slot_date: params.selectedDate || '2026-09-14',
     date: params.selectedDate || '2026-09-14',
+    timeSlot: '07:30 PM – 09:00 PM',
     slot_start_time: '07:30 PM',
     slot_end_time: '09:00 PM',
     token_number: tokenNumberValue,
     tokenNumber: tokenNumberValue,
-    pass_id: b?.pass_id || b?.passId || `GA-PASS-2026-${Math.floor(10000 + Math.random() * 90000)}`,
-    passId: b?.pass_id || b?.passId || `GA-PASS-2026-${Math.floor(10000 + Math.random() * 90000)}`,
-    pass_generated: true,
-    passGenerated: true,
+    pass_id: generatedPassId,
+    passId: generatedPassId,
+    pass_generated: Boolean(params.status === 'ACCEPTED'),
+    passGenerated: Boolean(params.status === 'ACCEPTED'),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...(b || {}),
@@ -507,20 +545,31 @@ export async function changeBookingStatusAtomic(params: {
     console.warn('API adminUpdateBookingStatus notice, updating Firestore directly:', err);
   }
 
-  // Update Firestore directly
+  // Update Firestore directly preserving existing userId
   try {
     const bookingRef = doc(db, 'bookings', params.bookingDocId);
+    const existingSnap = await getDoc(bookingRef);
+    const existingData = existingSnap.exists() ? existingSnap.data() : {};
+
+    const passId = params.passId || existingData.passId || existingData.pass_id || `GA-PASS-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+
     await setDoc(bookingRef, {
       status: params.targetStatus,
+      ...(params.targetStatus === 'ACCEPTED' ? {
+        passId,
+        pass_id: passId,
+        passGenerated: true,
+        pass_generated: true,
+      } : {}),
       ...(updatedToken ? { tokenNumber: updatedToken, token_number: updatedToken } : {}),
       ...(params.reason ? { rejection_reason: params.reason, rejectionReason: params.reason } : {}),
+      updatedAt: serverTimestamp(),
       updated_at: new Date().toISOString(),
     }, { merge: true });
 
     // Recount occupancy dynamically!
-    const bookingSnap = await getDoc(bookingRef);
-    if (bookingSnap.exists()) {
-      const bData = bookingSnap.data();
+    if (existingSnap.exists()) {
+      const bData = existingData;
       const sDate = bData.slot_date || bData.date || '2026-09-14';
       const sId = bData.slot_id || 1;
       await recountSlotOccupancy(sDate, sId);
