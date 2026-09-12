@@ -1,0 +1,251 @@
+{
+  "entities": {
+    "user": {
+      "title": "User",
+      "description": "Registered devotee or administrator profile",
+      "type": "object",
+      "properties": {
+        "full_name": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"]
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["full_name", "email", "phone", "role"]
+    },
+    "booking": {
+      "title": "Booking",
+      "description": "Aarti reservation booking pass for a devotee",
+      "type": "object",
+      "properties": {
+        "pass_code": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "devotee_name": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "number_of_people": {
+          "type": "number"
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "special_request": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "ACCEPTED", "CANCELLED", "REJECTED"]
+        },
+        "booking_source": {
+          "type": "string",
+          "enum": ["ONLINE", "MANUAL"]
+        },
+        "slot_id": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "user_id": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "start_time": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "end_time": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["pass_code", "devotee_name", "phone", "email", "number_of_people", "status", "slot_id", "user_id"]
+    },
+    "aarti_slot": {
+      "title": "Aarti Slot",
+      "description": "Aarti time slot for a specific date",
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "startTime": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "endTime": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "start_time": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "end_time": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "capacity": {
+          "type": "number"
+        },
+        "bookedCount": {
+          "type": "number"
+        },
+        "booked_count": {
+          "type": "number"
+        },
+        "remainingSeats": {
+          "type": "number"
+        },
+        "remaining_capacity": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["AVAILABLE", "OPEN", "FULL", "CLOSED"]
+        }
+      },
+      "required": ["date", "capacity", "status"]
+    },
+    "chanda_receipt": {
+      "title": "Chanda / Donation Receipt",
+      "description": "Official financial donation record for Ganesh Utsav (excluding private contact data)",
+      "type": "object",
+      "properties": {
+        "receiptId": {
+          "type": "string"
+        },
+        "receiptNumber": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "donorName": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "amount": {
+          "type": "number"
+        },
+        "amountInWords": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "paymentMode": {
+          "type": "string",
+          "enum": ["CASH", "UPI", "BANK_TRANSFER", "CHEQUE", "OTHER"]
+        },
+        "donationDate": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "collectedBy": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 250
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "createdBy": {
+          "type": "string",
+          "maxLength": 100
+        }
+      },
+      "required": ["receiptNumber", "donorName", "amount", "paymentMode", "donationDate"]
+    },
+    "system_counter": {
+      "title": "System Counter",
+      "description": "Centralized atomic sequential counter for receipt numbers",
+      "type": "object",
+      "properties": {
+        "currentNumber": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "updatedBy": {
+          "type": "string"
+        }
+      },
+      "required": ["currentNumber"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/user"
+      },
+      "description": "User account profiles"
+    },
+    "/bookings/{bookingId}": {
+      "schema": {
+        "$ref": "#/entities/booking"
+      },
+      "description": "Aarti pass bookings"
+    },
+    "/aartiSlots/{slotId}": {
+      "schema": {
+        "$ref": "#/entities/aarti_slot"
+      },
+      "description": "Available daily Aarti time slots"
+    },
+    "/aarti_slots/{slotId}": {
+      "schema": {
+        "$ref": "#/entities/aarti_slot"
+      },
+      "description": "Available daily Aarti time slots (alias)"
+    },
+    "/chandaReceipts/{receiptId}": {
+      "schema": {
+        "$ref": "#/entities/chanda_receipt"
+      },
+      "description": "Protected Chanda donation receipts accessible only to mandal administrator"
+    },
+    "/systemCounters/{counterId}": {
+      "schema": {
+        "$ref": "#/entities/system_counter"
+      },
+      "description": "System atomic counters accessible only to administrator"
+    }
+  }
+}

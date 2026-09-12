@@ -1,0 +1,8 @@
+{
+  "name": "Ganesh Aarti Booking & Management",
+  "description": "Complete modern Ganesh Aarti booking platform with devotee reservations, live slot availability, real-time updates, and an admin management dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

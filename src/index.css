@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    color: #1c1917;
+    background-color: #fcfbf7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, .font-serif {
+    font-family: 'Cinzel', serif;
+  }
+}
+
+/* Dark Mode / Night Mode Global Styles */
+.dark body {
+  background-color: #121110;
+  color: #f5f5f4;
+}
+
+.dark header, .dark nav {
+  background-color: rgba(24, 22, 20, 0.95) !important;
+  border-color: rgba(120, 53, 15, 0.35) !important;
+  color: #fef3c7 !important;
+}
+
+.dark .bg-white, 
+.dark .bg-\[\#fffdfa\], 
+.dark .bg-\[\#fcfbf7\], 
+.dark .bg-\[\#f8f6f0\],
+.dark .bg-stone-50,
+.dark .bg-amber-50\/80,
+.dark .bg-amber-50 {
+  background-color: #1c1a18 !important;
+  color: #f5f5f4 !important;
+}
+
+.dark .text-stone-900, 
+.dark .text-stone-950, 
+.dark .text-amber-950,
+.dark .text-amber-900 {
+  color: #fef3c7 !important;
+}
+
+.dark .text-stone-700, 
+.dark .text-stone-600, 
+.dark .text-stone-500,
+.dark .text-stone-800 {
+  color: #d6d3d1 !important;
+}
+
+.dark .border-stone-200, 
+.dark .border-stone-300,
+.dark .border-amber-200, 
+.dark .border-amber-100,
+.dark .border-amber-300\/50 {
+  border-color: rgba(120, 53, 15, 0.45) !important;
+}
+
+.dark input, 
+.dark select, 
+.dark textarea {
+  background-color: #292524 !important;
+  color: #f5f5f4 !important;
+  border-color: rgba(180, 83, 9, 0.5) !important;
+}
+
+.dark input::placeholder, 
+.dark textarea::placeholder {
+  color: #a8a29e !important;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #1c1917 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  
+  /* When printing, hide the primary web application container completely if a print job is active */
+  body.print-active #root,
+  body.print-active header,
+  body.print-active nav,
+  body.print-active footer,
+  body.print-active aside,
+  body.print-active #booking-pass-modal-backdrop,
+  body.print-active .toast-container,
+  body.print-active div[role="dialog"] {
+    display: none !important;
+  }
+
+  /* Ensure our dedicated same-origin print page container is visible and clean */
+  .print-page-container {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+
+  /* Fallback: Standard print utility */
+  .print\:hidden, button, .no-print {
+    display: none !important;
+  }
+
+  /* Ensure text colors, backgrounds, and images render properly in print */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

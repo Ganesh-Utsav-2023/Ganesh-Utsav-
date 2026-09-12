@@ -1,0 +1,86 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email == "navyuvakganeshmitramandal14@gmail.com";
+    }
+
+    function isOwner(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow create: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
+
+      allow update: if isAdmin()
+        || (
+          isOwner(userId)
+          && request.resource.data.role == resource.data.role
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+
+      // Authenticated users can create ONLY their own booking.
+      allow create: if isAdmin()
+        || (
+          isSignedIn()
+          && request.resource.data.userId == request.auth.uid
+        );
+
+      // Users can read only their own bookings.
+      // Admin can read all bookings.
+      allow read: if isAdmin()
+        || (
+          isSignedIn()
+          && resource.data.userId == request.auth.uid
+        );
+
+      // Admin can manage all bookings.
+      // Users can update/delete only their own bookings.
+      allow update, delete: if isAdmin()
+        || (
+          isSignedIn()
+          && resource.data.userId == request.auth.uid
+        );
+    }
+
+    match /aartiSlots/{slotId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /festivalSettings/{year} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /chandaReceipts/{receiptId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    match /expenses/{expenseId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    match /adminSettings/{adminUid} {
+      allow read, write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
