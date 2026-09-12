@@ -10,6 +10,7 @@ export interface User {
   role: UserRole;
   provider?: string;
   status?: string;
+  accountStatus?: 'ACTIVE' | 'BLOCKED';
   created_at: string;
   updated_at: string;
   last_login_at?: string;

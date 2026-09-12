@@ -9,7 +9,7 @@ import {
   onAuthStateChanged,
   updateProfile,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../firebaseConfig.ts';
 import { User } from '../types/index.ts';
 import { setStoredToken, clearStoredToken, getStoredToken } from '../lib/api.ts';
@@ -147,6 +147,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         try {
           const userRef = doc(db, 'users', firebaseUser.uid);
+          
+          // Setup real-time listener for user profile
+          const unsubProfile = onSnapshot(userRef, async (docSnap) => {
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              if (data.accountStatus === 'BLOCKED') {
+                unsubProfile();
+                await auth.signOut();
+                setUser(null);
+                setToken(null);
+                clearStoredToken();
+                // Can't throw here to stop the flow easily but we cleared the user.
+              } else {
+                setUser((prev) => prev ? {
+                  ...prev,
+                  status: data.accountStatus || data.status || 'ACTIVE',
+                  accountStatus: data.accountStatus || 'ACTIVE'
+                } as User : null);
+              }
+            }
+          });
+          
           const userSnap = await getDoc(userRef);
 
           if (!userSnap.exists()) {
@@ -158,7 +180,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               phone: profile.phone,
               role: role,
               provider: profile.provider,
-              status: 'Active',
+              accountStatus: 'ACTIVE',
               createdAt: nowIso,
               updatedAt: nowIso,
             }, { merge: true });
@@ -173,7 +195,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               phone: data.phone || firebaseUser.phoneNumber || '',
               role: role as 'admin' | 'user',
               provider: data.provider || firebaseUser.providerData[0]?.providerId || 'password',
-              status: data.status || 'Active',
+              accountStatus: data.accountStatus || 'ACTIVE',
               created_at: data.created_at || data.createdAt || nowIso,
               updated_at: nowIso,
             };
@@ -182,7 +204,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               await setDoc(userRef, { role, updatedAt: nowIso }, { merge: true });
             }
           }
-        } catch (dbErr) {
+          
+          if (profile.accountStatus === 'BLOCKED') {
+            await auth.signOut();
+            throw new Error('Your account has been blocked by the administrator.');
+          }
+        } catch (dbErr: any) {
+          if (dbErr.message === 'Your account has been blocked by the administrator.') {
+            throw dbErr;
+          }
           console.warn("Firestore user profile sync warning (proceeding with Auth profile):", dbErr);
         }
 
@@ -207,6 +237,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userSnap = await getDoc(doc(db, 'users', currentFBUser.uid));
       if (userSnap.exists()) {
         const data = userSnap.data();
+        const accountStatus = data.accountStatus || data.status || 'ACTIVE';
+        if (accountStatus === 'BLOCKED') {
+          await auth.signOut();
+          setUser(null);
+          setToken(null);
+          clearStoredToken();
+          return;
+        }
         setUser({
           id: currentFBUser.uid,
           uid: currentFBUser.uid,
@@ -216,7 +254,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           phone: data.phone || '',
           role: role as 'admin' | 'user',
           provider: data.provider || 'password',
-          status: data.status || 'Active',
+          status: accountStatus,
+          accountStatus: accountStatus as 'ACTIVE' | 'BLOCKED',
           created_at: data.created_at || data.createdAt || new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });
@@ -255,7 +294,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         phone: '',
         role: role as 'admin' | 'user',
         provider: 'password',
-        status: 'Active',
+        status: 'ACTIVE',
         created_at: nowIso,
         updated_at: nowIso,
       };
@@ -275,10 +314,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             phone: data.phone || '',
             role: role as 'admin' | 'user',
             provider: 'password',
-            status: data.status || 'Active',
+            status: data.accountStatus || data.status || 'ACTIVE',
             created_at: data.created_at || data.createdAt || nowIso,
             updated_at: nowIso,
           };
+          
+          if (profile.status === 'BLOCKED') {
+            await auth.signOut();
+            throw new Error('Your account has been blocked by the administrator.');
+          }
         } else {
           await setDoc(userRef, {
             uid: firebaseUser.uid,
@@ -288,12 +332,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             phone: profile.phone,
             role: role,
             provider: 'password',
-            status: 'Active',
+            status: 'ACTIVE',
+            accountStatus: 'ACTIVE',
             createdAt: nowIso,
             updatedAt: nowIso,
           }, { merge: true });
         }
-      } catch (dbErr) {
+      } catch (dbErr: any) {
+        if (dbErr.message === 'Your account has been blocked by the administrator.') {
+          throw dbErr;
+        }
         console.warn("Firestore profile sync warning during login:", dbErr);
       }
 
@@ -351,7 +399,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         phone: cleanPhone,
         role: role as 'admin' | 'user',
         provider: 'password',
-        status: 'Active',
+        status: 'ACTIVE',
+        accountStatus: 'ACTIVE',
         created_at: nowIso,
         updated_at: nowIso,
       };
@@ -365,7 +414,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           phone: cleanPhone,
           role: role,
           provider: 'password',
-          status: 'Active',
+          status: 'ACTIVE',
+          accountStatus: 'ACTIVE',
           createdAt: nowIso,
           updatedAt: nowIso,
         }, { merge: true });
@@ -453,10 +503,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             phone: data.phone || firebaseUser.phoneNumber || '',
             role: role as 'admin' | 'user',
             provider: 'google.com',
-            status: data.status || 'Active',
+            status: data.accountStatus || data.status || 'ACTIVE',
             created_at: data.created_at || data.createdAt || nowIso,
             updated_at: nowIso,
           };
+
+          if (profile.status === 'BLOCKED') {
+            await auth.signOut();
+            throw new Error('Your account has been blocked by the administrator.');
+          }
         } else {
           await setDoc(userRef, {
             uid: firebaseUser.uid,
@@ -466,12 +521,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             phone: profile.phone,
             role: role,
             provider: 'google.com',
-            status: 'Active',
+            status: 'ACTIVE',
+            accountStatus: 'ACTIVE',
             createdAt: nowIso,
             updatedAt: nowIso,
           }, { merge: true });
         }
-      } catch (dbErr) {
+      } catch (dbErr: any) {
+        if (dbErr.message === 'Your account has been blocked by the administrator.') {
+          throw dbErr;
+        }
         console.warn("Firestore profile sync warning during google login:", dbErr);
       }
 

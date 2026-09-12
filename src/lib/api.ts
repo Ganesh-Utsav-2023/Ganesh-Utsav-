@@ -211,6 +211,11 @@ export const api = {
       body: JSON.stringify({ role }),
     }),
 
+  deleteUser: (uid: string) =>
+    request<{ message: string }>(`/api/users/${uid}`, {
+      method: 'DELETE',
+    }),
+
   // Activity Log
   getActivity: () => request<{ activities: AdminActivity[] }>('/api/activity'),
 };

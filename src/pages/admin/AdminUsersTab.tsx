@@ -33,6 +33,7 @@ export const AdminUsersTab: React.FC = () => {
   // Filters & Sorting
   const [search, setSearch] = useState('');
   const [providerFilter, setProviderFilter] = useState<'ALL' | 'GOOGLE' | 'PASSWORD'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'BLOCKED'>('ALL');
   const [sortBy, setSortBy] = useState<'NEWEST' | 'OLDEST' | 'BOOKINGS' | 'NAME'>('NEWEST');
 
   // Modals
@@ -120,6 +121,13 @@ export const AdminUsersTab: React.FC = () => {
   const filteredDevotees = useMemo(() => {
     return devoteesWithStats
       .filter((u) => {
+        // Status filter
+        if (statusFilter === 'ACTIVE') {
+          if ((u.status || '').toUpperCase() === 'BLOCKED') return false;
+        } else if (statusFilter === 'BLOCKED') {
+          if ((u.status || '').toUpperCase() !== 'BLOCKED') return false;
+        }
+
         // Provider filter
         if (providerFilter === 'GOOGLE') {
           if (!u.provider?.toLowerCase().includes('google')) return false;
@@ -159,6 +167,7 @@ export const AdminUsersTab: React.FC = () => {
     if (!deleteModalDevotee) return;
     setIsDeleting(true);
     try {
+      await api.deleteUser(deleteModalDevotee.id);
       await deleteDoc(doc(db, 'users', deleteModalDevotee.id));
       setDevotees((prev) => prev.filter((d) => d.id !== deleteModalDevotee.id));
       setDeleteModalDevotee(null);
@@ -169,6 +178,28 @@ export const AdminUsersTab: React.FC = () => {
       alert(`Failed to delete devotee account: ${err.message || 'Permission denied'}`);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleToggleBlock = async (uid: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED';
+    try {
+      // In Firestore, we just update the accountStatus field
+      // We don't use setDoc with merge for the whole object to avoid triggering unnecessary merges
+      // We rely on api.ts or just direct firestore write if rules allow
+      // The prompt says "Admin can perform block/unblock operations", which implies direct firestore update.
+      const { updateDoc } = await import('firebase/firestore');
+      await updateDoc(doc(db, 'users', uid), {
+        accountStatus: newStatus,
+        status: newStatus
+      });
+      // Updating local state optimistically
+      setDevotees(prev => prev.map(d => d.id === uid ? { ...d, status: newStatus } : d));
+      if (selectedDevotee?.id === uid) {
+        setSelectedDevotee(prev => prev ? { ...prev, status: newStatus } : null);
+      }
+    } catch (err: any) {
+      alert(`Failed to change account status: ${err.message}`);
     }
   };
 
@@ -258,6 +289,20 @@ export const AdminUsersTab: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Status Filter */}
+          <div className="flex items-center gap-1.5 text-xs text-stone-600">
+            <Shield className="w-3.5 h-3.5 text-stone-400" />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="text-xs px-2.5 py-1.5 rounded-xl border border-stone-300 bg-white focus:border-amber-500 outline-none cursor-pointer"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="ACTIVE">Active Users</option>
+              <option value="BLOCKED">Blocked Users</option>
+            </select>
+          </div>
+
           {/* Provider Filter */}
           <div className="flex items-center gap-1.5 text-xs text-stone-600">
             <Filter className="w-3.5 h-3.5 text-stone-400" />
@@ -345,9 +390,13 @@ export const AdminUsersTab: React.FC = () => {
                             <span className="font-bold text-stone-900 block">
                               {u.displayName || u.full_name || 'Devotee'}
                             </span>
-                            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-medium">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                              {u.status || 'Active'}
+                            <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${
+                              (u.status || '').toUpperCase() === 'BLOCKED' ? 'text-rose-700' : 'text-emerald-700'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                (u.status || '').toUpperCase() === 'BLOCKED' ? 'bg-rose-500' : 'bg-emerald-500'
+                              }`} />
+                              {(u.status || 'ACTIVE').toUpperCase()}
                             </span>
                           </div>
                         </div>
@@ -435,14 +484,35 @@ export const AdminUsersTab: React.FC = () => {
                           <Eye className="w-3 h-3" />
                           <span>View</span>
                         </button>
+                        
+                        {(u.email || '').toLowerCase() === AUTHORIZED_ADMIN_EMAIL.toLowerCase() ? (
+                          <span className="px-2 py-1 rounded-lg text-[10px] text-amber-800 bg-amber-50 border border-amber-200 ml-2">
+                            Admin Account — Protected
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleToggleBlock(u.id, u.status)}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer ${
+                                u.status === 'BLOCKED'
+                                  ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                  : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                              }`}
+                              title={u.status === 'BLOCKED' ? 'Unblock Account' : 'Block Account'}
+                            >
+                              <Shield className="w-3 h-3" />
+                              <span>{u.status === 'BLOCKED' ? 'Unblock Account' : 'Block Account'}</span>
+                            </button>
 
-                        <button
-                          onClick={() => setDeleteModalDevotee(u)}
-                          className="px-2 py-1 rounded-lg text-[11px] text-rose-600 hover:bg-rose-50 transition-colors inline-flex items-center cursor-pointer"
-                          title="Remove user account from Firestore"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                            <button
+                              onClick={() => setDeleteModalDevotee(u)}
+                              className="px-2 py-1 rounded-lg text-[11px] text-rose-600 hover:bg-rose-50 transition-colors inline-flex items-center cursor-pointer ml-1"
+                              title="Delete this registered account permanently"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   );

@@ -25,6 +25,7 @@ service cloud.firestore {
         || (
           isOwner(userId)
           && request.resource.data.role == resource.data.role
+          && request.resource.data.accountStatus == resource.data.accountStatus
         );
 
       allow delete: if isAdmin();
